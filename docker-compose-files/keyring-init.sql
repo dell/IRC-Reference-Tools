@@ -1,0 +1,2 @@
+-- keyring-init.sql
+ALTER INSTANCE RELOAD KEYRING;

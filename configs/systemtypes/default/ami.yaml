@@ -1,0 +1,25 @@
+name: "ami"
+isBuiltIn: true
+
+powerState:
+  uri: "/redfish/v1/Systems/Self"
+  path: "$.PowerState"
+  monitorType: "redfish-sse"
+  powerOnMsgId: "EventLog.1.0.StatusChange"
+  powerOffMsgId: "EventLog.1.0.StatusChange"
+  powerOnMessageArgs: "3-Enabled"
+  powerOffMessageArgs: "3-StandbyOffline"
+
+systemId:
+  uri: "/redfish/v1/Systems/Self"
+  path: "$.SerialNumber"
+
+shutdown:
+  graceful:
+    uri: "/redfish/v1/Systems/Self/Actions/ComputerSystem.Reset"
+    method: "POST"
+    body: '{"ResetType": "GracefulShutdown"}'
+  force:
+    uri: "/redfish/v1/Systems/Self/Actions/ComputerSystem.Reset"
+    method: "POST"
+    body: '{"ResetType": "ForceOff"}'

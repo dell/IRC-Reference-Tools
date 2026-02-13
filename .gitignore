@@ -1,0 +1,8 @@
+go.work
+go.work.sum
+
+# Local docker compose secrets
+docker-compose-files/.env
+
+# TLS certs
+.certs/

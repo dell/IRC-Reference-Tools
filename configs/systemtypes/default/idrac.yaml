@@ -1,0 +1,33 @@
+name: "idrac"
+isBuiltIn: true
+
+powerState:
+  uri: "/redfish/v1/Chassis/System.Embedded.1"
+  path: "$.PowerState"
+  monitorType: "redfish-sse"
+  powerOnMsgId: "IDRAC.SYS1000"
+  powerOffMsgId: "IDRAC.SYS1001"
+
+systemId:
+  uri: "/redfish/v1"
+  path: "$.Oem.Dell.ServiceTag"
+
+sysInfo:
+  hostname:
+    uri: "/redfish/v1/Systems/System.Embedded.1"
+    path: "$.HostName"
+  fwver:
+    uri: "/redfish/v1/Managers/iDRAC.Embedded.1"
+    path: "$.FirmwareVersion"
+
+sseFilter: "?$filter=EventType%20eq%20%27Alert%27"
+
+shutdown:
+  graceful:
+    uri: "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+    method: "POST"
+    body: '{"ResetType": "GracefulShutdown"}'
+  force:
+    uri: "/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+    method: "POST"
+    body: '{"ResetType": "ForceOff"}'

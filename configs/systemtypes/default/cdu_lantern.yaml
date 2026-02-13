@@ -1,0 +1,23 @@
+name: "cdu_lantern"
+isBuiltIn: true
+
+powerState:
+  uri: "/redfish/v1/Systems/Self"
+  path: "$.PowerState"
+  monitorType: "redfish-sse"
+  powerOnMsgId: "RCDU005"
+  powerOffMsgId: "RCDU011"
+
+systemId:
+  uri: "/redfish/v1/Systems/Self"
+  path: "$.SerialNumber"
+
+shutdown:
+  graceful:
+    uri: "/redfish/v1/Managers/Self/Actions/Oem/LITEONManager.SystemSwitch"
+    method: "POST"
+    body: '{"Switch": "0"}'
+  force:
+    uri: "/redfish/v1/Managers/Self/Actions/Oem/LITEONManager.SystemSwitch"
+    method: "POST"
+    body: '{"Switch": "0"}'

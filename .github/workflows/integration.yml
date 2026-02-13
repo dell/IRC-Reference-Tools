@@ -1,0 +1,69 @@
+name: integration
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'run-integration')
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Bring up docker compose stack
+        run: bash docker-compose-files/compose.sh up -d --build
+
+      - name: Wait for configui readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+120))
+          until curl -kfsS https://localhost/api/v1/Systems >/dev/null; do
+            if (( SECONDS > deadline )); then
+              echo "Timed out waiting for configui readiness"
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Run integration tests
+        run: go test -tags=integration ./tests/integration -v
+
+      - name: Docker compose ps (always)
+        if: always()
+        run: bash docker-compose-files/compose.sh ps
+
+      - name: Collect docker compose logs (always)
+        if: always()
+        run: bash docker-compose-files/compose.sh logs --no-color > compose.log
+
+      - name: Upload compose logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs
+          path: compose.log
+          retention-days: 7
+
+      - name: Tear down docker compose stack
+        if: always()
+        run: bash docker-compose-files/compose.sh down -v

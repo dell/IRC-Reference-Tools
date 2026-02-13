@@ -1,0 +1,219 @@
+x-env-mysql: &mysql-env
+  MYSQL_DATABASE: "irc_reftools"
+  MYSQL_USER: "reftools"
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+  MYSQL_HOST: "mysqldb"
+  MYSQL_HOST_PORT: "3306"
+
+x-env-messagebus: &messagebus-env
+  MESSAGEBUS_HOST: activemq
+  MESSAGEBUS_PORT: 61613
+
+x-env-logging: &logging-env
+  LOG_LEVEL: ${LOG_LEVEL:-warn} # debug, info, warn, error
+
+x-arg-base: &base-args
+  USER_ID: "3012"
+  GROUP_ID: "3012"
+  USERNAME: irc
+  GROUPNAME: irc
+
+x-build-base: &base-build
+    context: .
+    dockerfile: docker-compose-files/Dockerfile
+    args:
+      <<: *base-args
+
+x-refdaemon: &refdaemon
+  user: irc:irc
+  build:
+    <<: *base-build
+  environment:
+    <<: [*messagebus-env, *logging-env]
+  depends_on:
+    activemq:
+      condition: service_healthy
+    mysqldb:
+      condition: service_healthy
+  networks:
+    - host-bridge-net
+
+services:
+  certgen:
+    image: alpine:3.20
+    container_name: certgen
+    profiles:
+      - certgen
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        CERT_DIR=/certs
+        mkdir -p "$$CERT_DIR"
+        CERT="$$CERT_DIR/localhost.crt"
+        KEY="$$CERT_DIR/localhost.key"
+        if [ ! -f "$$CERT" ] || [ ! -f "$$KEY" ]; then
+          echo "Generating self-signed localhost certs in $$CERT_DIR ..."
+          apk add --no-cache openssl
+          openssl req -x509 -out "$$CERT" -keyout "$$KEY" \
+            -newkey rsa:2048 -nodes -sha256 -days 365 \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1" \
+            -addext "keyUsage=digitalSignature" \
+            -addext "extendedKeyUsage=serverAuth"
+          # Ensure configui (irc:irc = UID 3012) can read the key
+          chown 3012:3012 "$$KEY" "$$CERT"
+          chmod 600 "$$KEY"
+          chmod 644 "$$CERT"
+        else
+          echo "Certs already exist; skipping."
+        fi
+        echo "certgen done."
+    volumes:
+      - "${PWD}/.certs:/certs"
+    restart: "no"
+    networks:
+      - host-bridge-net
+
+
+  activemq:
+    container_name: activemq
+    image: rmohr/activemq:latest
+    networks:
+      - host-bridge-net
+    ports:
+      - "8161:8161"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8161/"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+  
+  mysqldb:
+    container_name: mysqldb
+    image: mysql:latest
+    restart: always
+    user: root # Mandatory to fix permissions on every startup
+    environment:
+      <<: *mysql-env
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    networks:
+      - host-bridge-net
+    volumes:
+      - mysqldb-volume:/var/lib/mysql
+      - mysql-keyring-data:/var/lib/mysql-keyring:rw
+      - ./docker-compose-files/mysqld.my:/mnt/keyring-init/mysqld.my:ro
+      - ./docker-compose-files/component_keyring_file.cnf:/mnt/keyring-init/component_keyring_file.cnf:ro
+      # IMPORTANT: Mount the init script to a DIFFERENT location to avoid the RO error
+      - ./docker-compose-files/keyring-init.sql:/mnt/keyring-init/keyring-init.sql:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        # 1. CLEANUP STALE SOCKETS AND PIDS (Fixes MY-010259)
+        # Check if the lock file exists and kill the process listed inside it
+        if [ -f /var/lib/mysql/mysql.sock.lock ]; then
+          STALE_PID=$(cat /var/lib/mysql/mysql.sock.lock)
+          echo "Found stale lock file with PID $STALE_PID. Cleaning up..."
+          kill -9 $STALE_PID 2>/dev/null || true
+          rm -f /var/lib/mysql/mysql.sock /var/lib/mysql/mysql.sock.lock
+        fi
+        # Also clear the standard runtime directory
+        rm -f /var/run/mysqld/mysqld.sock /var/run/mysqld/mysqld.sock.lock
+
+        # 2. Setup paths for 2025 EL9 images
+        PLUGIN_DIR="/usr/lib64/mysql/plugin"
+        mkdir -p "$$PLUGIN_DIR" /var/lib/mysql-keyring /docker-entrypoint-initdb.d
+        
+        # 3. Copy files (Using cp allows us to bypass mount-point restrictions)
+        cp /mnt/keyring-init/mysqld.my /usr/sbin/mysqld.my
+        cp /mnt/keyring-init/component_keyring_file.cnf "$$PLUGIN_DIR/component_keyring_file.cnf"
+        cp /mnt/keyring-init/keyring-init.sql /docker-entrypoint-initdb.d/keyring-init.sql
+        
+        # 4. Mandatory 2025 Security Permissions (UID 999)
+        chown 999:999 /usr/sbin/mysqld.my "$$PLUGIN_DIR/component_keyring_file.cnf" /docker-entrypoint-initdb.d/keyring-init.sql
+        chmod 444 /usr/sbin/mysqld.my "$$PLUGIN_DIR/component_keyring_file.cnf" /docker-entrypoint-initdb.d/keyring-init.sql
+        
+        # 5. Fix keyring storage permissions
+        chown -R 999:999 /var/lib/mysql-keyring
+        chmod 750 /var/lib/mysql-keyring
+        
+        # 6. Create keyring data file (required for MySQL 9.5 keyring component)
+        touch /var/lib/mysql-keyring/keyring_data
+        chown 999:999 /var/lib/mysql-keyring/keyring_data
+        chmod 644 /var/lib/mysql-keyring/keyring_data
+        
+        # 7. Hand off to the standard entrypoint
+        exec docker-entrypoint.sh mysqld
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "reftools", "-p${MYSQL_PASSWORD}"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+
+  configui:
+    <<: *refdaemon
+    image: irc-reference-tools/configui:latest
+    build:
+      <<: *base-build
+      dockerfile: docker-compose-files/Dockerfile.configui
+      args:
+        <<: *base-args
+        CMD: configui
+    environment:
+      <<: [*mysql-env, *logging-env, *messagebus-env]
+      CONFIGUI_HTTP_PORT: 8082       #sample reference - specify web application port
+      CONFIGUI_JWT_SECRET: ${CONFIGUI_JWT_SECRET}
+    ports:
+      - "443:8082"
+    volumes:
+      - ${PWD}/.certs:/extrabin/certs:ro
+  
+  dbdiscauth:
+    <<: *refdaemon
+    image: irc-reference-tools/dbdiscauth:latest
+    environment:
+      <<: [*messagebus-env, *logging-env, *mysql-env]
+    build:
+      <<: *base-build
+      args:
+        <<: *base-args
+        CMD: dbdiscauth
+
+  redfishread:
+    <<: *refdaemon
+    image: irc-reference-tools/redfishread:latest
+    environment:
+      <<: [*messagebus-env, *logging-env]
+      INCLUDE_ALERTS: true
+    build:
+      <<: *base-build
+      args:
+        <<: *base-args
+        CMD: redfishread
+    volumes:
+      - ./configs/systemtypes:/configs/systemtypes:ro
+  
+  action:
+    <<: *refdaemon
+    image: irc-reference-tools/action:latest
+    build:
+      <<: *base-build
+      dockerfile: docker-compose-files/Dockerfile.action
+      args:
+        <<: *base-args
+        CMD: action
+    volumes:
+      - ./configs/systemtypes:/configs/systemtypes:ro
+
+networks:
+  host-bridge-net:
+    driver: bridge
+
+volumes:
+  mysqldb-volume:
+  mysql-keyring-data:

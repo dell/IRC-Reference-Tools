@@ -1,0 +1,21 @@
+name: "irc"
+isBuiltIn: true
+isParent: true
+
+systemId:
+  uri: "/redfish/v1/Managers/IRC"
+  path: "$.Oem.Dell.ServiceTag"
+
+powerState:
+  uri: "/redfish/v1/Chassis/IRC"
+  path: "$.PowerState"
+
+sysInfo:
+  fqdn:
+    uri: "/redfish/v1/Managers/IRC/EthernetInterfaces/mgmt0"
+    path: "$.IPv4Addresses[0].Address"
+
+sseFilter: "?$filter=EventType%20eq%20%27Alert%27"
+
+hasWatchdog: true
+hasValves: true
