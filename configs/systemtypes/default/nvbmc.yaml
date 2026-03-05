@@ -1,4 +1,4 @@
-name: "nvidia_openbmc"
+name: "nvbmc"
 isBuiltIn: true
 
 powerState:
@@ -14,10 +14,10 @@ systemId:
 
 shutdown:
   graceful:
-    uri: "/redfish/v1/Systems/System0/Actions/ComputerSystem.Reset"
+    uri: "/redfish/v1/Systems/System_0/Actions/ComputerSystem.Reset"
     method: "POST"
     body: '{"ResetType": "GracefulShutdown"}'
   force:
-    uri: "/redfish/v1/Systems/System0/Actions/ComputerSystem.Reset"
+    uri: "/redfish/v1/Systems/System_0/Actions/ComputerSystem.Reset"
     method: "POST"
     body: '{"ResetType": "ForceOff"}'
