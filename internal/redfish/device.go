@@ -26,6 +26,49 @@ type ConfigurableDevice struct {
 	CtxCancel context.CancelFunc
 }
 
+// StartPowerStatePolling polls Redfish power state for monitorType redfish-get.
+func (d *ConfigurableDevice) StartPowerStatePolling(authClient auth.AuthClientInterface) {
+	pollInterval := time.Duration(d.Config.PowerState.PollingInterval) * time.Second
+	maxPollCount := d.Config.PowerState.PollCount
+	pollsDone := 0
+
+	for {
+		select {
+		case <-d.Ctx.Done():
+			return
+		default:
+		}
+
+		powerState, err := d.Client.GetPowerState()
+		pollsDone++
+		if err != nil {
+			log.Printf("%s: Failed to poll power state: %v", d.Client.GetHostname(), err)
+			authClient.UpdateServiceItemState(auth.CONNFAILED, d.Client.GetHostname())
+		} else {
+			state := "Power Status " + powerState
+			switch strings.ToLower(strings.TrimSpace(powerState)) {
+			case "on":
+				state = auth.POWERSTATEON
+			case "off":
+				state = auth.POWERSTATEOFF
+			}
+			if err := authClient.UpdateServiceItemState(state, d.Client.GetHostname()); err != nil {
+				log.Printf("%s: Failed to update power state %q: %v", d.Client.GetHostname(), state, err)
+			}
+		}
+
+		if maxPollCount > 0 && pollsDone >= maxPollCount {
+			return
+		}
+
+		select {
+		case <-d.Ctx.Done():
+			return
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
 // ConfigurableDevices is a map of IP to ConfigurableDevice
 type ConfigurableDevices map[string]*ConfigurableDevice
 
@@ -221,6 +264,16 @@ func (d *ConfigurableDevice) MonitorStart(dataBusService *databus.DataBusService
 	authClient.UpdateServiceState(auth.MONITORING, d.Client.GetHostname())
 	d.State = auth.RUNNING
 
-	// Start alert listener
-	d.StartAlertListener(dataBusService)
+	if d.Config == nil || d.Config.PowerState == nil {
+		return
+	}
+
+	switch d.Config.PowerState.MonitorType {
+	case systemtype.MonitorTypeRedfishSSE:
+		// Start SSE alert listener
+		d.StartAlertListener(dataBusService)
+	case systemtype.MonitorTypeRedfishGet:
+		// Start periodic Redfish GET polling loop
+		d.StartPowerStatePolling(authClient)
+	}
 }

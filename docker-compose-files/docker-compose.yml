@@ -71,7 +71,7 @@ services:
         fi
         echo "certgen done."
     volumes:
-      - "${PWD}/.certs:/certs"
+      - "./.certs:/certs"
     restart: "no"
     networks:
       - host-bridge-net
@@ -171,7 +171,7 @@ services:
     ports:
       - "443:8082"
     volumes:
-      - ${PWD}/.certs:/extrabin/certs:ro
+      - ./.certs:/extrabin/certs:ro
   
   dbdiscauth:
     <<: *refdaemon

@@ -9,6 +9,7 @@ systemId:
 powerState:
   uri: "/redfish/v1/Chassis/IRC"
   path: "$.PowerState"
+  monitorType: "redfish-sse"
 
 sysInfo:
   fqdn:

@@ -94,11 +94,15 @@ func validatePowerState(cfg *SystemTypeConfig, path string) error {
 	// Validate PowerStateConfig
 	switch cfg.PowerState.MonitorType {
 	case MonitorTypeRedfishSSE:
-		if cfg.PowerState.PowerOnMsgId == "" || cfg.PowerState.PowerOffMsgId == "" {
-			return fmt.Errorf("config file %s: powerOnMsgId and powerOffMsgId required when monitorType is '%s'", path, MonitorTypeRedfishSSE)
-		}
 		if cfg.PowerState.URI == "" || cfg.PowerState.Path == "" {
 			return fmt.Errorf("config file %s: uri and path required when monitorType is '%s'", path, MonitorTypeRedfishSSE)
+		}
+		// IRC uses SSE strictly for leak/valve alerts, so power transition message IDs are optional.
+		if strings.EqualFold(cfg.Name, "irc") {
+			break
+		}
+		if cfg.PowerState.PowerOnMsgId == "" || cfg.PowerState.PowerOffMsgId == "" {
+			return fmt.Errorf("config file %s: powerOnMsgId and powerOffMsgId required when monitorType is '%s'", path, MonitorTypeRedfishSSE)
 		}
 		// Validate message args format if provided
 		if cfg.PowerState.PowerOnMessageArgs != "" {
@@ -111,13 +115,20 @@ func validatePowerState(cfg *SystemTypeConfig, path string) error {
 				return fmt.Errorf("config file %s: invalid powerOffMessageArgs: %v", path, err)
 			}
 		}
+	case MonitorTypeRedfishGet:
+		if cfg.PowerState.URI == "" || cfg.PowerState.Path == "" {
+			return fmt.Errorf("config file %s: uri and path required when monitorType is '%s'", path, MonitorTypeRedfishGet)
+		}
+		if cfg.PowerState.PollCount <= 0 {
+			return fmt.Errorf("config file %s: pollCount must be > 0 when monitorType is '%s' (infinite polling is not allowed)", path, MonitorTypeRedfishGet)
+		}
 	case MonitorTypeTCPPing:
 		// No additional validation needed for tcp-ping
 	case "":
 		// Default to tcp-ping if not specified
 		cfg.PowerState.MonitorType = MonitorTypeTCPPing
 	default:
-		return fmt.Errorf("config file %s: invalid monitorType '%s', must be '%s' or '%s'", path, cfg.PowerState.MonitorType, MonitorTypeRedfishSSE, MonitorTypeTCPPing)
+		return fmt.Errorf("config file %s: invalid monitorType '%s', must be '%s', '%s', or '%s'", path, cfg.PowerState.MonitorType, MonitorTypeRedfishSSE, MonitorTypeRedfishGet, MonitorTypeTCPPing)
 	}
 
 	return nil

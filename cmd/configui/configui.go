@@ -81,6 +81,7 @@ func getIRCList(c *gin.Context, s *config.SystemHandler) {
 		ircList = append(ircList, irc)
 	}
 	systemTypes := s.AuthClient.GetAllSystemTypes()
+	logging.Info("IRC SYSTEM", "ircList", ircList, "systemTypes", systemTypes, "valvestatus", valvestatus)
 	c.JSON(200, gin.H{"status": "Fetched IRC list", "data": ircList, "systemTypes": systemTypes})
 }
 

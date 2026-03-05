@@ -3,6 +3,7 @@ package systemtype
 // Monitor type constants
 const (
 	MonitorTypeRedfishSSE = "redfish-sse"
+	MonitorTypeRedfishGet = "redfish-get"
 	MonitorTypeTCPPing    = "tcp-ping"
 )
 
@@ -29,7 +30,9 @@ type ShutdownConfig struct {
 // PowerStateConfig defines power state monitoring configuration
 type PowerStateConfig struct {
 	EndpointConfig      `json:",inline" yaml:",inline"` // Embed uri and path
-	MonitorType         string                          `json:"monitorType" yaml:"monitorType"`                                     // "redfish-sse" or "tcp-ping"
+	MonitorType         string                          `json:"monitorType" yaml:"monitorType"`                                     // "redfish-sse", "redfish-get", or "tcp-ping"
+	PollingInterval     int                             `json:"pollingInterval,omitempty" yaml:"pollingInterval,omitempty"`         // For redfish-get only (seconds)       // For redfish-get only (seconds)
+	PollCount           int                             `json:"pollCount,omitempty" yaml:"pollCount,omitempty"`                     // For redfish-get only (>0 required)
 	PowerOnMsgId        string                          `json:"powerOnMsgId,omitempty" yaml:"powerOnMsgId,omitempty"`               // For redfish-sse only
 	PowerOffMsgId       string                          `json:"powerOffMsgId,omitempty" yaml:"powerOffMsgId,omitempty"`             // For redfish-sse only
 	PowerOnMessageArgs  string                          `json:"powerOnMessageArgs,omitempty" yaml:"powerOnMessageArgs,omitempty"`   // MessageArgs containing these strings indicate power on

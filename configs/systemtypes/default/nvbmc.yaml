@@ -1,0 +1,23 @@
+name: "nvidia_openbmc"
+isBuiltIn: true
+
+powerState:
+  uri: "/redfish/v1/Systems/System_0"
+  path: "$.PowerState"
+  monitorType: "redfish-get"
+  pollingInterval: 5
+  pollCount: 50
+
+systemId:
+  uri: "/redfish/v1/Systems/System_0"
+  path: "$.SerialNumber"
+
+shutdown:
+  graceful:
+    uri: "/redfish/v1/Systems/System0/Actions/ComputerSystem.Reset"
+    method: "POST"
+    body: '{"ResetType": "GracefulShutdown"}'
+  force:
+    uri: "/redfish/v1/Systems/System0/Actions/ComputerSystem.Reset"
+    method: "POST"
+    body: '{"ResetType": "ForceOff"}'

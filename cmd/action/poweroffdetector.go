@@ -37,7 +37,7 @@ func (defaultPowerOffDetectorFactory) ForServiceItem(si auth.ServiceItem, authCl
 	}
 
 	switch config.PowerState.MonitorType {
-	case systemtype.MonitorTypeRedfishSSE:
+	case systemtype.MonitorTypeRedfishSSE, systemtype.MonitorTypeRedfishGet:
 		return &DBPowerOffChecker{ip: si.Ip, authClient: authClient}
 	case systemtype.MonitorTypeTCPPing, "":
 		return &TCPUnreachablePowerOffChecker{ip: si.Ip}

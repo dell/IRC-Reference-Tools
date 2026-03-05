@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"strings"
@@ -226,7 +225,7 @@ func main() {
 					continue
 				}
 				devices[service.Ip].CtxCancel()
-				fmt.Println("context has been cancelled for service IP:", service.Ip)
+				logging.Info("Context cancelled for service IP:", "ip", service.Ip)
 				delete(devices, service.Ip)
 			case auth.TERMINATE:
 				logging.Info("Received terminate command, shutting down")
