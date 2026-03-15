@@ -1,9 +1,9 @@
 package logging
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
-	"reflect"
 	"strings"
 
 	"github.com/dell/iDRAC-Telemetry-Reference-Tools/pkg/auth"
@@ -120,107 +120,13 @@ func sanitizeAny(v any) any {
 		}
 		return out
 	default:
-		rv := reflect.ValueOf(v)
-		return sanitizeReflect(rv)
-	}
-}
-
-func sanitizeReflect(rv reflect.Value) any {
-	if !rv.IsValid() {
-		return nil
-	}
-
-	// Unwrap interface
-	if rv.Kind() == reflect.Interface {
-		if rv.IsNil() {
-			return nil
+		// For unknown types, use String() if available (e.g. auth.Service already
+		// redacts sensitive fields in its Stringer implementation). This avoids
+		// expensive reflection on every log call.
+		if s, ok := v.(fmt.Stringer); ok {
+			return s.String()
 		}
-		return sanitizeAny(rv.Elem().Interface())
-	}
-
-	// Handle pointers
-	if rv.Kind() == reflect.Ptr {
-		if rv.IsNil() {
-			return nil
-		}
-		s := sanitizeReflect(rv.Elem())
-		// Preserve pointer shape where possible
-		if s == nil {
-			return nil
-		}
-		return s
-	}
-
-	switch rv.Kind() {
-	case reflect.Slice, reflect.Array:
-		l := rv.Len()
-		out := make([]any, 0, l)
-		for i := 0; i < l; i++ {
-			out = append(out, sanitizeAny(rv.Index(i).Interface()))
-		}
-		return out
-	case reflect.Map:
-		// Best effort for maps (commonly map[string]any / map[string]string)
-		out := make(map[string]any, rv.Len())
-		iter := rv.MapRange()
-		for iter.Next() {
-			k := iter.Key()
-			v := iter.Value()
-			ks, ok := k.Interface().(string)
-			if !ok {
-				continue
-			}
-			if isSensitiveKey(ks) {
-				out[ks] = "[REDACTED]"
-				continue
-			}
-			out[ks] = sanitizeAny(v.Interface())
-		}
-		return out
-	case reflect.Struct:
-		// Copy the struct and redact known-sensitive fields.
-		// If we can't safely set fields, fall back to original value.
-		out := reflect.New(rv.Type()).Elem()
-		out.Set(rv)
-		for i := 0; i < out.NumField(); i++ {
-			ft := out.Type().Field(i)
-			// Skip unexported
-			if ft.PkgPath != "" {
-				continue
-			}
-			key := ft.Name
-			if tag := ft.Tag.Get("json"); tag != "" {
-				name := strings.Split(tag, ",")[0]
-				if name != "" && name != "-" {
-					key = name
-				}
-			}
-			f := out.Field(i)
-			if !f.CanSet() {
-				continue
-			}
-			if isSensitiveKey(key) {
-				if f.Kind() == reflect.String {
-					f.SetString("[REDACTED]")
-				}
-				continue
-			}
-			// Sanitize nested composites
-			switch f.Kind() {
-			case reflect.Struct, reflect.Map, reflect.Slice, reflect.Array, reflect.Ptr, reflect.Interface:
-				s := sanitizeReflect(f)
-				if s == nil {
-					continue
-				}
-				sv := reflect.ValueOf(s)
-				if sv.IsValid() && sv.Type().AssignableTo(f.Type()) {
-					f.Set(sv)
-				}
-			}
-		}
-		return out.Interface()
-	default:
-		return rv.Interface()
+		return v
 	}
 }
 

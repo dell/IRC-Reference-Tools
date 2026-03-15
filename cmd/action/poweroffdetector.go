@@ -42,15 +42,15 @@ func (defaultPowerOffDetectorFactory) ForServiceItem(si auth.ServiceItem, authCl
 	// Get system type config
 	config := systemTypeRegistry.Get(si.Systemtypedesc)
 	if config == nil || config.PowerState == nil {
-		logging.Info("[DEBUG] No config or PowerState for device, falling back to TCP", "ip", si.Ip, "systemtype", si.Systemtypedesc)
+		logging.Info("No config or PowerState for device, falling back to TCP", "ip", si.Ip, "systemtype", si.Systemtypedesc)
 		return &TCPUnreachablePowerOffChecker{ip: si.Ip}
 	}
 
-	logging.Info("[DEBUG] PowerOffDetectorFactory selecting detector", "ip", si.Ip, "systemtype", si.Systemtypedesc, "monitorType", config.PowerState.MonitorType)
+	logging.Info("PowerOffDetectorFactory selecting detector", "ip", si.Ip, "systemtype", si.Systemtypedesc, "monitorType", config.PowerState.MonitorType)
 
 	switch config.PowerState.MonitorType {
 	case systemtype.MonitorTypeRedfishSSE:
-		logging.Info("[DEBUG] Using DBPowerOffChecker (redfish-sse)", "ip", si.Ip)
+		logging.Info("Using DBPowerOffChecker (redfish-sse)", "ip", si.Ip)
 		return &DBPowerOffChecker{ip: si.Ip, authClient: authClient}
 	case systemtype.MonitorTypeRedfishGet:
 		client := newRedfishGetClient(si.Ip, si.Auth["username"], si.Auth["password"], config)
@@ -58,7 +58,7 @@ func (defaultPowerOffDetectorFactory) ForServiceItem(si auth.ServiceItem, authCl
 		if config.PowerState.PollingInterval > 0 {
 			interval = time.Duration(config.PowerState.PollingInterval) * time.Second
 		}
-		logging.Info("[DEBUG] Using RedfishGetPowerOffChecker (redfish-get)", "ip", si.Ip, "pollInterval", interval)
+		logging.Info("Using RedfishGetPowerOffChecker (redfish-get)", "ip", si.Ip, "pollInterval", interval)
 		return &RedfishGetPowerOffChecker{
 			ip:            si.Ip,
 			authClient:    authClient,
@@ -103,16 +103,16 @@ type RedfishGetPowerOffChecker struct {
 func (c *RedfishGetPowerOffChecker) IsPoweredOff() bool {
 	powerState, err := c.getPowerState()
 	if err != nil {
-		logging.Error("[DEBUG] Failed to poll power state via Redfish GET", "ip", c.ip, "err", err)
+		logging.Error("Failed to poll power state via Redfish GET", "ip", c.ip, "err", err)
 		return false
 	}
-	logging.Info("[DEBUG] RedfishGetPowerOffChecker polled power state", "ip", c.ip, "powerState", powerState)
+	logging.Info("Polled power state via Redfish GET", "ip", c.ip, "powerState", powerState)
 	if strings.EqualFold(strings.TrimSpace(powerState), "off") {
-		logging.Info("[DEBUG] Power off CONFIRMED via Redfish GET - updating DB", "ip", c.ip)
+		logging.Info("Power off confirmed via Redfish GET, updating DB", "ip", c.ip)
 		c.authClient.UpdateServiceItemState(auth.POWERSTATEOFF, c.ip)
 		return true
 	}
-	logging.Info("[DEBUG] Power still ON via Redfish GET, will keep polling", "ip", c.ip, "powerState", powerState)
+	logging.Debug("Power still on via Redfish GET, will keep polling", "ip", c.ip, "powerState", powerState)
 	return false
 }
 

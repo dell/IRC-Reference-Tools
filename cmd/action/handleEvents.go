@@ -38,7 +38,7 @@ var ircMessageIdState = map[string]string{
 }
 
 func waitForPowerOffLoop(timeoutSeconds int, service auth.Service, detector PowerOffDetector) bool {
-	logging.Info("[DEBUG] waitForPowerOffLoop started", "timeoutSeconds", timeoutSeconds, "detectorType", fmt.Sprintf("%T", detector), "pollInterval", detector.PollInterval())
+	logging.Info("waitForPowerOffLoop started", "timeoutSeconds", timeoutSeconds, "detectorType", fmt.Sprintf("%T", detector), "pollInterval", detector.PollInterval())
 	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
 	poll := time.NewTicker(detector.PollInterval())
 	pet := time.NewTicker(watchdogPetInterval)
@@ -49,11 +49,11 @@ func waitForPowerOffLoop(timeoutSeconds int, service auth.Service, detector Powe
 		select {
 		case <-poll.C:
 			if detector.IsPoweredOff() {
-				logging.Info("[DEBUG] waitForPowerOffLoop: power off detected, returning true")
+				logging.Info("waitForPowerOffLoop: power off detected")
 				return true
 			}
 			if time.Now().After(deadline) {
-				logging.Info("[DEBUG] waitForPowerOffLoop: deadline reached, returning false")
+				logging.Info("waitForPowerOffLoop: deadline reached, timed out")
 				return false
 			}
 		case <-pet.C:
