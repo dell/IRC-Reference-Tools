@@ -92,8 +92,10 @@ func handleAuthServiceChannel(ctx context.Context, serviceIn <-chan *auth.Servic
 						authClient.UpdateServiceItemState(auth.CONNFAILED, service.Ip)
 					}
 				}
-				// Start the alert monitoring process
-				go device.MonitorStart(dataBusService, authClient)
+				if config.PowerState != nil && config.PowerState.MonitorType == systemtype.MonitorTypeRedfishSSE {
+					// Start the alert monitoring process
+					go device.MonitorStart(dataBusService, authClient)
+				}
 			} else if strings.Contains(err.Error(), "401") {
 				logging.Error("Failed to add device, authentication failed", "ip", service.Ip)
 				authClient.UpdateServiceState(auth.CONNFAILED, service.Ip)

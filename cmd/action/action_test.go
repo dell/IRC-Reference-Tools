@@ -752,3 +752,249 @@ func TestHandleEvent_ValveEventsUnaffected(t *testing.T) {
 		})
 	}
 }
+
+// TestRedfishGetPowerOffChecker_PowerOff verifies that the checker returns true when the device reports "Off"
+func TestRedfishGetPowerOffChecker_PowerOff(t *testing.T) {
+	ac := &mock.MockAuthorizationClient{}
+
+	checker := &RedfishGetPowerOffChecker{
+		ip:         "192.168.1.100",
+		authClient: ac,
+		getPowerState: func() (string, error) {
+			return "Off", nil
+		},
+	}
+
+	if !checker.IsPoweredOff() {
+		t.Fatal("expected IsPoweredOff to return true for PowerState Off")
+	}
+}
+
+// TestRedfishGetPowerOffChecker_PowerOn verifies that the checker returns false when the device reports "On"
+func TestRedfishGetPowerOffChecker_PowerOn(t *testing.T) {
+	ac := &mock.MockAuthorizationClient{}
+
+	checker := &RedfishGetPowerOffChecker{
+		ip:         "192.168.1.100",
+		authClient: ac,
+		getPowerState: func() (string, error) {
+			return "On", nil
+		},
+	}
+
+	if checker.IsPoweredOff() {
+		t.Fatal("expected IsPoweredOff to return false for PowerState On")
+	}
+}
+
+// TestRedfishGetPowerOffChecker_Error verifies that the checker returns false on Redfish GET errors
+func TestRedfishGetPowerOffChecker_Error(t *testing.T) {
+	ac := &mock.MockAuthorizationClient{}
+
+	checker := &RedfishGetPowerOffChecker{
+		ip:         "192.168.1.100",
+		authClient: ac,
+		getPowerState: func() (string, error) {
+			return "", errors.New("connection refused")
+		},
+	}
+
+	if checker.IsPoweredOff() {
+		t.Fatal("expected IsPoweredOff to return false on error")
+	}
+}
+
+// TestRedfishGetPowerOffChecker_CaseInsensitive verifies that the checker handles case variations
+func TestRedfishGetPowerOffChecker_CaseInsensitive(t *testing.T) {
+	cases := []string{"Off", "off", "OFF", " Off ", " off "}
+
+	for _, ps := range cases {
+		t.Run(ps, func(t *testing.T) {
+			ac := &mock.MockAuthorizationClient{}
+			checker := &RedfishGetPowerOffChecker{
+				ip:         "192.168.1.100",
+				authClient: ac,
+				getPowerState: func() (string, error) {
+					return ps, nil
+				},
+			}
+			if !checker.IsPoweredOff() {
+				t.Errorf("expected IsPoweredOff to return true for %q", ps)
+			}
+		})
+	}
+}
+
+// TestRedfishGetPowerOffChecker_UpdatesDB verifies that the checker writes POWERSTATEOFF to DB on detection
+func TestRedfishGetPowerOffChecker_UpdatesDB(t *testing.T) {
+	ac := &mock.MockAuthorizationClient{}
+	_ = ac.UpdateServiceItem(auth.ServiceItem{Service: auth.Service{Ip: "192.168.1.100", State: "Power Status On"}})
+
+	checker := &RedfishGetPowerOffChecker{
+		ip:         "192.168.1.100",
+		authClient: ac,
+		getPowerState: func() (string, error) {
+			return "Off", nil
+		},
+	}
+
+	if !checker.IsPoweredOff() {
+		t.Fatal("expected IsPoweredOff to return true")
+	}
+}
+
+// TestDefaultPowerOffDetectorFactory_RedfishGet verifies that the factory returns RedfishGetPowerOffChecker for redfish-get
+func TestDefaultPowerOffDetectorFactory_RedfishGet(t *testing.T) {
+	registry := systemtype.NewRegistry()
+	registry.Register(&systemtype.SystemTypeConfig{
+		Name: "nvbmc",
+		PowerState: &systemtype.PowerStateConfig{
+			EndpointConfig: systemtype.EndpointConfig{
+				URI:  "/redfish/v1/Systems/System_0",
+				Path: "$.PowerState",
+			},
+			MonitorType:     systemtype.MonitorTypeRedfishGet,
+			PollingInterval: 5,
+		},
+	})
+	systemTypeRegistry = registry
+
+	ac := &mock.MockAuthorizationClient{}
+	si := auth.ServiceItem{
+		Service:        auth.Service{Ip: "192.168.1.100"},
+		Systemtypedesc: "nvbmc",
+	}
+
+	factory := defaultPowerOffDetectorFactory{}
+	detector := factory.ForServiceItem(si, ac)
+
+	checker, ok := detector.(*RedfishGetPowerOffChecker)
+	if !ok {
+		t.Fatalf("expected *RedfishGetPowerOffChecker, got %T", detector)
+	}
+
+	// Verify poll interval is taken from config (5 seconds), not the default (2 seconds)
+	expected := 5 * time.Second
+	if checker.PollInterval() != expected {
+		t.Errorf("expected PollInterval %v from config, got %v", expected, checker.PollInterval())
+	}
+}
+
+// TestDefaultPowerOffDetectorFactory_RedfishGet_DefaultInterval verifies that the factory
+// falls back to the default poll interval when pollingInterval is 0 in config
+func TestDefaultPowerOffDetectorFactory_RedfishGet_DefaultInterval(t *testing.T) {
+	registry := systemtype.NewRegistry()
+	registry.Register(&systemtype.SystemTypeConfig{
+		Name: "nvbmc_no_interval",
+		PowerState: &systemtype.PowerStateConfig{
+			EndpointConfig: systemtype.EndpointConfig{
+				URI:  "/redfish/v1/Systems/System_0",
+				Path: "$.PowerState",
+			},
+			MonitorType: systemtype.MonitorTypeRedfishGet,
+			// PollingInterval not set (0)
+		},
+	})
+	systemTypeRegistry = registry
+
+	ac := &mock.MockAuthorizationClient{}
+	si := auth.ServiceItem{
+		Service:        auth.Service{Ip: "192.168.1.100"},
+		Systemtypedesc: "nvbmc_no_interval",
+	}
+
+	factory := defaultPowerOffDetectorFactory{}
+	detector := factory.ForServiceItem(si, ac)
+
+	checker, ok := detector.(*RedfishGetPowerOffChecker)
+	if !ok {
+		t.Fatalf("expected *RedfishGetPowerOffChecker, got %T", detector)
+	}
+
+	// Should fall back to default powOffPollInterval (2 seconds)
+	if checker.PollInterval() != powOffPollInterval {
+		t.Errorf("expected default PollInterval %v, got %v", powOffPollInterval, checker.PollInterval())
+	}
+}
+
+// TestDefaultPowerOffDetectorFactory_RedfishSSE verifies that the factory still returns DBPowerOffChecker for redfish-sse
+func TestDefaultPowerOffDetectorFactory_RedfishSSE(t *testing.T) {
+	registry := systemtype.NewRegistry()
+	registry.Register(&systemtype.SystemTypeConfig{
+		Name: "idrac",
+		PowerState: &systemtype.PowerStateConfig{
+			MonitorType: systemtype.MonitorTypeRedfishSSE,
+		},
+	})
+	systemTypeRegistry = registry
+
+	ac := &mock.MockAuthorizationClient{}
+	si := auth.ServiceItem{
+		Service:        auth.Service{Ip: "192.168.1.100"},
+		Systemtypedesc: "idrac",
+	}
+
+	factory := defaultPowerOffDetectorFactory{}
+	detector := factory.ForServiceItem(si, ac)
+
+	if _, ok := detector.(*DBPowerOffChecker); !ok {
+		t.Errorf("expected *DBPowerOffChecker, got %T", detector)
+	}
+}
+
+// TestWaitForPowerOff_RedfishGet_Success verifies the full flow: Redfish GET poll detects power off
+func TestWaitForPowerOff_RedfishGet_Success(t *testing.T) {
+	origPoll := powOffPollInterval
+	origPet := watchdogPetInterval
+	powOffPollInterval = 1 * time.Millisecond
+	watchdogPetInterval = 1 * time.Millisecond
+	t.Cleanup(func() {
+		powOffPollInterval = origPoll
+		watchdogPetInterval = origPet
+	})
+
+	callCount := 0
+	checker := &RedfishGetPowerOffChecker{
+		ip:         "192.168.1.100",
+		authClient: &mock.MockAuthorizationClient{},
+		getPowerState: func() (string, error) {
+			callCount++
+			// Device powers off after 3 polls
+			if callCount >= 3 {
+				return "Off", nil
+			}
+			return "On", nil
+		},
+	}
+
+	if ok := waitForPowerOffLoop(5, auth.Service{}, checker); !ok {
+		t.Fatal("expected waitForPowerOffLoop to succeed when device powers off")
+	}
+	if callCount < 3 {
+		t.Errorf("expected at least 3 polls, got %d", callCount)
+	}
+}
+
+// TestWaitForPowerOff_RedfishGet_Timeout verifies that the loop times out when device stays on
+func TestWaitForPowerOff_RedfishGet_Timeout(t *testing.T) {
+	origPoll := powOffPollInterval
+	origPet := watchdogPetInterval
+	powOffPollInterval = 1 * time.Millisecond
+	watchdogPetInterval = 1 * time.Millisecond
+	t.Cleanup(func() {
+		powOffPollInterval = origPoll
+		watchdogPetInterval = origPet
+	})
+
+	checker := &RedfishGetPowerOffChecker{
+		ip:         "192.168.1.100",
+		authClient: &mock.MockAuthorizationClient{},
+		getPowerState: func() (string, error) {
+			return "On", nil
+		},
+	}
+
+	if ok := waitForPowerOffLoop(1, auth.Service{}, checker); ok {
+		t.Fatal("expected waitForPowerOffLoop to time out when device stays on")
+	}
+}

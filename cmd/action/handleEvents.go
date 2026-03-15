@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	powOffPollInterval   = 2 * time.Second
 	watchdogPetInterval  = 5 * time.Second
 	forceShutdownTimeout = 10 * time.Second
 )
@@ -39,8 +38,9 @@ var ircMessageIdState = map[string]string{
 }
 
 func waitForPowerOffLoop(timeoutSeconds int, service auth.Service, detector PowerOffDetector) bool {
+	logging.Info("[DEBUG] waitForPowerOffLoop started", "timeoutSeconds", timeoutSeconds, "detectorType", fmt.Sprintf("%T", detector), "pollInterval", detector.PollInterval())
 	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
-	poll := time.NewTicker(powOffPollInterval)
+	poll := time.NewTicker(detector.PollInterval())
 	pet := time.NewTicker(watchdogPetInterval)
 	defer poll.Stop()
 	defer pet.Stop()
@@ -49,9 +49,11 @@ func waitForPowerOffLoop(timeoutSeconds int, service auth.Service, detector Powe
 		select {
 		case <-poll.C:
 			if detector.IsPoweredOff() {
+				logging.Info("[DEBUG] waitForPowerOffLoop: power off detected, returning true")
 				return true
 			}
 			if time.Now().After(deadline) {
+				logging.Info("[DEBUG] waitForPowerOffLoop: deadline reached, returning false")
 				return false
 			}
 		case <-pet.C:
@@ -195,13 +197,27 @@ func Shutdown(items []auth.ServiceItem, authClient auth.AuthClientInterface, ser
 func shutdownWithFallback(si auth.ServiceItem, shutdowner Shutdowner, authClient auth.AuthClientInterface, service auth.Service) bool {
 	logging.Debug("Shutdown with fallback", "serviceItem", si)
 	// If shutdown is explicitly forceful, skip graceful.
-	if si.IsForcefulshutdown {
+	stConfig := systemTypeRegistry.Get(si.Systemtypedesc)
+	if si.IsForcefulshutdown && stConfig.PowerState.MonitorType == systemtype.MonitorTypeRedfishSSE {
 		ok := runShutdownOnce(si, shutdowner, authClient, service)
 		if !ok {
 			return false
 		}
 		// Wait for forceful shutdown timeout
 		time.Sleep(forceShutdownTimeout)
+		return true
+	} else if si.IsForcefulshutdown && stConfig.PowerState.MonitorType == systemtype.MonitorTypeRedfishGet {
+		ok := runShutdownOnce(si, shutdowner, authClient, service)
+		if !ok {
+			return false
+		}
+		// Poll via Redfish GET to confirm power off
+		detector := defaultPowerOffDetectorFactory{}.ForServiceItem(si, authClient)
+		timeout := si.Timeout
+		if timeout <= 0 {
+			timeout = int(forceShutdownTimeout.Seconds())
+		}
+		waitForPowerOffLoop(timeout, service, detector)
 		return true
 	}
 

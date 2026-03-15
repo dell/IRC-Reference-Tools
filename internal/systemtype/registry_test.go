@@ -363,27 +363,10 @@ func TestValidatePowerState(t *testing.T) {
 						Path: "$.PowerState",
 					},
 					MonitorType: MonitorTypeRedfishGet,
-					PollCount:   5,
 				},
 			},
 			path:        "test.yaml",
 			expectError: false,
-		},
-		{
-			name: "redfish-get with zero poll count",
-			config: &SystemTypeConfig{
-				PowerState: &PowerStateConfig{
-					EndpointConfig: EndpointConfig{
-						URI:  "/redfish/v1/Systems/1",
-						Path: "$.PowerState",
-					},
-					MonitorType: MonitorTypeRedfishGet,
-					PollCount:   0,
-				},
-			},
-			path:        "test.yaml",
-			expectError: true,
-			errorMsg:    "pollCount must be > 0 when monitorType is 'redfish-get'",
 		},
 		{
 			name: "missing power state",

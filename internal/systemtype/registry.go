@@ -119,9 +119,6 @@ func validatePowerState(cfg *SystemTypeConfig, path string) error {
 		if cfg.PowerState.URI == "" || cfg.PowerState.Path == "" {
 			return fmt.Errorf("config file %s: uri and path required when monitorType is '%s'", path, MonitorTypeRedfishGet)
 		}
-		if cfg.PowerState.PollCount <= 0 {
-			return fmt.Errorf("config file %s: pollCount must be > 0 when monitorType is '%s' (infinite polling is not allowed)", path, MonitorTypeRedfishGet)
-		}
 	case MonitorTypeTCPPing:
 		// No additional validation needed for tcp-ping
 	case "":

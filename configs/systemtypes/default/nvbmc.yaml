@@ -5,8 +5,7 @@ powerState:
   uri: "/redfish/v1/Systems/System_0"
   path: "$.PowerState"
   monitorType: "redfish-get"
-  pollingInterval: 5
-  pollCount: 50
+  pollingInterval: 2
 
 systemId:
   uri: "/redfish/v1/Systems/System_0"
