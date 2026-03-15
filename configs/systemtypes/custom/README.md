@@ -132,6 +132,7 @@ powerState:
 - Requires `uri` and `path` to specify the Redfish endpoint and JSONPath for power state extraction
 - Use `pollingInterval` to control how frequently the device is polled (in seconds). Defaults to 2 seconds if not specified.
 - Best for devices that support Redfish but do not support SSE
+- **Note on forceful shutdown**: When a rack device is configured for forceful shutdown with `redfish-get` monitoring, the system polls for power-off confirmation with a default timeout of **10 seconds**. Make sure `pollingInterval` is less than this timeout so that at least a few polls can occur before the deadline expires. For example, a `pollingInterval` of 2-3 seconds is recommended.
 
 ```yaml
 powerState:
