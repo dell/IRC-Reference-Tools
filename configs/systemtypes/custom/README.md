@@ -97,9 +97,10 @@ Defines how to monitor and detect power state changes for this device. Supports 
 
 | Field | Required for | Description |
 |-------|--------------|-------------|
-| `monitorType` | **Yes** | Type of power state monitoring: `"redfish-sse"` or `"tcp-ping"` |
-| `uri` | redfish-sse | Redfish API endpoint for power state polling |
-| `path` | redfish-sse | JSONPath expression to extract power state from response |
+| `monitorType` | **Yes** | Type of power state monitoring: `"redfish-sse"`, `"redfish-get"`, or `"tcp-ping"` |
+| `uri` | redfish-sse, redfish-get | Redfish API endpoint for power state |
+| `path` | redfish-sse, redfish-get | JSONPath expression to extract power state from response |
+| `pollingInterval` | redfish-get (optional) | Polling interval in seconds for Redfish GET power-off detection. Defaults to 2 seconds if not set. |
 | `powerOnMsgId` | redfish-sse | Message ID that indicates power on event |
 | `powerOffMsgId` | redfish-sse | Message ID that indicates power off event |
 | `powerOnMessageArgs` | redfish-sse (optional) | Message arguments that indicate power on state |
@@ -126,7 +127,21 @@ powerState:
   powerOffMessageArgs: "3-PoweredOff"
 ```
 
-**2. `tcp-ping` (TCP Connectivity Check)**
+**2. `redfish-get` (Redfish GET Polling)**
+- Monitors power state by periodically polling the device via Redfish GET requests
+- Requires `uri` and `path` to specify the Redfish endpoint and JSONPath for power state extraction
+- Use `pollingInterval` to control how frequently the device is polled (in seconds). Defaults to 2 seconds if not specified.
+- Best for devices that support Redfish but do not support SSE
+
+```yaml
+powerState:
+  monitorType: "redfish-get"
+  uri: "/redfish/v1/Systems/System_0"
+  path: "$.PowerState"
+  pollingInterval: 5
+```
+
+**3. `tcp-ping` (TCP Connectivity Check)**
 - Monitors power state by checking TCP connectivity
 - Checks default ports: 22, 80, 443
 - Best for devices that don't support SSE or when network-based detection is preferred
@@ -136,7 +151,7 @@ powerState:
   monitorType: "tcp-ping"
 ```
 
-**3. Default Behavior**
+**4. Default Behavior**
 - If `monitorType` is not specified, defaults to `"tcp-ping"`
 
 ### `shutdown` (Required)
@@ -203,9 +218,10 @@ The `path` field uses JSONPath syntax to extract values from JSON responses:
 | Monitor Type | Use Case | Pros | Cons |
 |--------------|----------|------|------|
 | **`redfish-sse`** | Devices with SSE support | Event-driven, instant detection, less network traffic | Requires SSE support, more complex setup |
-| **`tcp-ping`** | Simple network monitoring | Simple, works with any network device, no SSE required | Polling-based, less precise, more network traffic |
+| **`redfish-get`** | Devices with Redfish but no SSE | Works with any Redfish device, configurable polling interval | Polling-based, slightly higher network traffic than SSE |
+| **`tcp-ping`** | Simple network monitoring | Simple, works with any network device, no Redfish required | Polling-based, less precise, more network traffic |
 
-**Recommendation**: Use `redfish-sse` for modern Redfish-compliant devices that support Server-Sent Events. Use `tcp-ping` for older devices or when SSE is not available.
+**Recommendation**: Use `redfish-sse` for modern Redfish-compliant devices that support Server-Sent Events. Use `redfish-get` for Redfish-capable devices that do not support SSE (e.g., NvBMC). Use `tcp-ping` for older devices or when Redfish is not available.
 
 ---
 
@@ -225,5 +241,6 @@ The `path` field uses JSONPath syntax to extract values from JSON responses:
 - **Values not being retrieved**: Check that your JSONPath expressions match the actual JSON response structure.
 - **Power state events not working**: 
   - For `redfish-sse`: Verify `powerOnMsgId` and `powerOffMsgId` match the actual message IDs from your device
+  - For `redfish-get`: Verify the `uri` and `path` return a valid power state (e.g., `"On"` or `"Off"`). Adjust `pollingInterval` if needed.
   - For `tcp-ping`: Ensure the device is reachable on ports 22, 80, or 443 when powered on
 - **Configuration validation errors**: Check that all required fields for your `monitorType` are present.
