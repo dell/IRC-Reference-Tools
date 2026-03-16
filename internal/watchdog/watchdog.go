@@ -38,9 +38,9 @@ func SetWatchdogTimeout(service auth.Service, timeout int) error {
 
 func EndWatchdog(service auth.Service) error {
 	logging.Info("Ending watchdog", "ip", service.Ip)
-	resp, err := httpclient.Patch(
-		"https://"+service.Ip+simplePolicyURI,
-		map[string]interface{}{"WatchdogTimeout": 0},
+	resp, err := httpclient.Post(
+		"https://"+service.Ip+endWatchdogURI,
+		map[string]interface{}{},
 		nil,
 		service.Auth["username"],
 		service.Auth["password"],
@@ -55,9 +55,9 @@ func EndWatchdog(service auth.Service) error {
 
 func PetWatchdog(service auth.Service) error {
 	logging.Info("Petting watchdog", "ip", service.Ip)
-	resp, err := httpclient.Patch(
-		"https://"+service.Ip+simplePolicyURI,
-		map[string]interface{}{"WatchdogTimeout": DEFAULTWATCHDOGTIMEOUT},
+	resp, err := httpclient.Post(
+		"https://"+service.Ip+petWatchdogURI,
+		map[string]interface{}{},
 		nil,
 		service.Auth["username"],
 		service.Auth["password"],

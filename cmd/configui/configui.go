@@ -192,6 +192,12 @@ func AddAssociatedSystem(c *gin.Context, s *config.SystemHandler) {
 	logging.Info("Adding Associated System")
 	logging.Info("System details", "system", system)
 
+	// Graceful shutdown requires a non-zero timeout
+	if !system.IsForcefulshutdown && system.Timeout <= 0 {
+		c.JSON(400, gin.H{"error": "timeout must be greater than 0 for graceful shutdown"})
+		return
+	}
+
 	// Get IRC IP from URL
 	ircIP := c.Param("ip")
 	system.Type = 0
