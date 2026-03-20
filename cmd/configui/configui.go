@@ -189,8 +189,11 @@ func AddAssociatedSystem(c *gin.Context, s *config.SystemHandler) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	logging.Info("Adding Associated System")
-	logging.Info("System details", "system", system)
+	logging.Info("Adding Associated System",
+		"ip", system.IP,
+		"systemtypedesc", system.Systemtypedesc,
+		"isforcefulshutdown", system.IsForcefulshutdown,
+		"timeout", system.Timeout)
 
 	// Graceful shutdown requires a non-zero timeout
 	if !system.IsForcefulshutdown && system.Timeout <= 0 {

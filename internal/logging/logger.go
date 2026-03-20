@@ -5,8 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-
-	"github.com/dell/iDRAC-Telemetry-Reference-Tools/pkg/auth"
 )
 
 const defaultLogLevel = slog.LevelWarn
@@ -82,33 +80,6 @@ func sanitizeAny(v any) any {
 	}
 
 	switch t := v.(type) {
-	case auth.Service:
-		return sanitizeAuthService(t)
-	case *auth.Service:
-		if t == nil {
-			return (*auth.Service)(nil)
-		}
-		out := sanitizeAuthService(*t)
-		return &out
-	case auth.ServiceItem:
-		return sanitizeAuthServiceItem(t)
-	case *auth.ServiceItem:
-		if t == nil {
-			return (*auth.ServiceItem)(nil)
-		}
-		out := sanitizeAuthServiceItem(*t)
-		return &out
-	case auth.Login:
-		out := t
-		out.Password = "[REDACTED]"
-		return out
-	case *auth.Login:
-		if t == nil {
-			return (*auth.Login)(nil)
-		}
-		out := *t
-		out.Password = "[REDACTED]"
-		return &out
 	case map[string]string:
 		return sanitizeStringMap(t)
 	case map[string]any:
@@ -120,27 +91,14 @@ func sanitizeAny(v any) any {
 		}
 		return out
 	default:
-		// For unknown types, use String() if available (e.g. auth.Service already
-		// redacts sensitive fields in its Stringer implementation). This avoids
+		// For types that implement Stringer (e.g. auth.Service already
+		// redacts sensitive fields in its String() method). This avoids
 		// expensive reflection on every log call.
 		if s, ok := v.(fmt.Stringer); ok {
 			return s.String()
 		}
 		return v
 	}
-}
-
-func sanitizeAuthService(s auth.Service) auth.Service {
-	out := s
-	out.Auth = sanitizeStringMap(s.Auth)
-	return out
-}
-
-func sanitizeAuthServiceItem(si auth.ServiceItem) auth.ServiceItem {
-	out := si
-	out.Service = sanitizeAuthService(si.Service)
-	out.Auth = sanitizeStringMap(si.Auth)
-	return out
 }
 
 func sanitizeStringMap(m map[string]string) map[string]string {
