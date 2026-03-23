@@ -1,7 +1,8 @@
 
 // src/IrcDashboard.jsx
-import React, { useEffect, useMemo, useRef, useState, memo } from 'react';
+import React, { useEffect, useRef, useState, memo } from 'react';
 import './App.css';
+import useSSE from './useSSE';
 
 import {
   Button, Dialog, DialogTitle, Checkbox, DialogContent, TextField, DialogActions,
@@ -35,62 +36,6 @@ import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import FormControlLabel from '@mui/material/FormControlLabel';
 
-
-const POLL_MS = 5000;
-
-/** Shared poller for IRC live status - reduces duplicate API calls */
-const useLiveStatusPoller = (ircList) => {
-  const [statusMap, setStatusMap] = useState({});
-  const abortRef = useRef(null);
-
-  const fetchAndUpdate = async () => {
-    if (abortRef.current) abortRef.current.abort();
-    abortRef.current = new AbortController();
-
-    try {
-      const res = await authFetch('/api/v1/irc', { signal: abortRef.current.signal, cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-
-      const newStatusMap = {};
-      (data?.data ?? []).forEach(item => {
-        const ip = item.ip ?? item.IP;
-        if (!ip) return;
-        newStatusMap[ip] = {
-          state: item.state ?? item.State,
-          valve1: item.valve1state ?? item.valve1Status ?? item.Valve1State ?? item.Valve1Status,
-          valve2: item.valve2state ?? item.valve2Status ?? item.Valve2State ?? item.Valve2Status,
-        };
-      });
-      setStatusMap(newStatusMap);
-    } catch (err) {
-      if (err.name !== 'AbortError') console.error('LiveStatus poller error:', err);
-    }
-  };
-
-  useEffect(() => {
-    // Only start polling when we have IRC systems to monitor
-    if (ircList.length === 0) return;
-    
-    fetchAndUpdate();
-
-    const intervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchAndUpdate();
-    }, POLL_MS);
-
-    const onFocus = () => fetchAndUpdate();
-    window.addEventListener('focus', onFocus);
-
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener('focus', onFocus);
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, [ircList.length]);
-
-  return statusMap;
-};
-
 /** Small “spinning then done” icon used in status */
 const ShutdownIcon = () => {
   const [isSpinning, setIsSpinning] = useState(true);
@@ -106,7 +51,6 @@ const ShutdownIcon = () => {
     <DoneIcon style={{ color: '#42A5F5' }} />
   );
 };
-
 
 /** Helpers for valve and system status visuals */
 const VALVE_COLORS = { open: '#2e7d32', closed: '#e57373',opening: '#FFB300', closing: '#e57373', unknown: '#616161' };
@@ -252,7 +196,7 @@ const LiveStatus = memo(function LiveStatus({
   );
 });
 
-/** IrcRow — shows associated rack devices for an IRC and polls only their status */
+/** IrcRow — shows associated rack devices for an IRC (SSE provides live updates) */
 function IrcRow({
   ircIp,
   expanded,
@@ -262,24 +206,15 @@ function IrcRow({
   onToggleLinkedIp,                // (ip: string) => void
   onToggleSelectAll,               // (checked: boolean) => void
 }) {
-  const controllerRef = useRef(null);
-  const intervalRef   = useRef(null);
-
+  // Fetch rack devices once when the row is expanded; SSE handles live updates.
   useEffect(() => {
-    if (!expanded) {
-      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-      if (controllerRef.current) { try { controllerRef.current.abort(); } catch {} controllerRef.current = null; }
-      return;
-    }
+    if (!expanded) return;
 
-    const refreshStatusOnly = async () => {
-      if (document.visibilityState === 'hidden') return;
-      if (controllerRef.current) { try { controllerRef.current.abort(); } catch {} }
-      const c = new AbortController();
-      controllerRef.current = c;
+    const controller = new AbortController();
 
+    (async () => {
       try {
-        const res = await authFetch(`/api/v1/irc/${ircIp}/racdevice`, { signal: c.signal });
+        const res = await authFetch(`/api/v1/irc/${ircIp}/racdevice`, { signal: controller.signal });
         if (!res.ok) return;
         const payload = await res.json();
         const incoming = Array.isArray(payload.data)
@@ -291,28 +226,13 @@ function IrcRow({
             }))
           : [];
 
-        setAssocByIrc(prev => {
-          const current = prev[ircIp] ?? [];
-          if (current.length === 0) return { ...prev, [ircIp]: incoming };
-          const byIp = new Map(incoming.map(it => [it.ip, it]));
-          const merged = current.map(it => {
-            const upd = byIp.get(it.ip);
-            return upd ? { ...it, status: upd.status } : it;
-          });
-          return { ...prev, [ircIp]: merged };
-        });
+        setAssocByIrc(prev => ({ ...prev, [ircIp]: incoming }));
       } catch (e) {
-        if (e.name !== 'AbortError') console.error('Status refresh failed for', ircIp, e);
+        if (e.name !== 'AbortError') console.error('Fetch rack devices failed for', ircIp, e);
       }
-    };
+    })();
 
-    refreshStatusOnly();
-    intervalRef.current = setInterval(refreshStatusOnly, POLL_MS);
-
-    return () => {
-      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-      if (controllerRef.current) { try { controllerRef.current.abort(); } catch {} controllerRef.current = null; }
-    };
+    return () => controller.abort();
   }, [expanded, ircIp, setAssocByIrc]);
 
   const rows = assocByIrc[ircIp] ?? [];
@@ -321,7 +241,6 @@ function IrcRow({
   const totalLinked = Array.isArray(rows) ? rows.length : 0;
   const allLinkedSelected = totalLinked > 0 && selectedLinkedIPs.size === totalLinked;
   const someLinkedSelected = selectedLinkedIPs.size > 0 && selectedLinkedIPs.size < totalLinked;
-
 
   return (
     <Collapse in={expanded} timeout="auto" unmountOnExit>
@@ -405,8 +324,8 @@ export default function IrcDashboard({ onLogout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Use shared poller for IRC live status - pass ircList to control when polling starts
-  const liveStatusMap = useLiveStatusPoller(ircList);
+  // Use SSE for live status updates
+  const { ircStatusMap: liveStatusMap, racdeviceBatch, connected: sseConnected } = useSSE();
 
   const [selectedIPs, setSelectedIPs] = useState(() => new Set());
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
@@ -421,56 +340,48 @@ export default function IrcDashboard({ onLogout }) {
   const [selectedIRC, setSelectedIRC] = useState(null);
   
   
-// Remove the old single-set if you no longer use it anywhere:
-// const [selectedLinkedIPs, setSelectedLinkedIPs] = React.useState(new Set());
+  // Linked-system deletion dialog state
+  const [linkedConfirmOpen, setLinkedConfirmOpen] = React.useState(false);
+  const [deletingLinked, setDeletingLinked] = React.useState(false);
+  const [linkedErrorMsg, setLinkedErrorMsg] = React.useState('');
 
-// Dialog & progress for linked deletion (these are fine)
-const [linkedConfirmOpen, setLinkedConfirmOpen] = React.useState(false);
-const [deletingLinked, setDeletingLinked] = React.useState(false);
-const [linkedErrorMsg, setLinkedErrorMsg] = React.useState('');
+  // Selected linked systems per IRC: { [ircIp]: Set<string> }
+  const [selectedLinkedByIrc, setSelectedLinkedByIrc] = React.useState({});
 
-// Selected linked systems per IRC (JS object: { [ircIp]: Set<string> })
-const [selectedLinkedByIrc, setSelectedLinkedByIrc] = React.useState({});
+  const toggleLinkedIp = (ircIp, ip) => {
+    setSelectedLinkedByIrc(prev => {
+      const next = { ...prev };
+      const set = new Set(next[ircIp] ?? []);
+      if (set.has(ip)) set.delete(ip);
+      else set.add(ip);
+      next[ircIp] = set;
+      return next;
+    });
+  };
 
-// Toggle a single linked IP for an IRC
-const toggleLinkedIp = (ircIp, ip) => {
-  setSelectedLinkedByIrc(prev => {
-    const next = { ...prev };
-    const set = new Set(next[ircIp] ?? []);
-    if (set.has(ip)) set.delete(ip);
-    else set.add(ip);
-    next[ircIp] = set;
-    return next;
-  });
-};
+  const toggleSelectAllLinked = (ircIp, checked) => {
+    setSelectedLinkedByIrc(prev => {
+      const next = { ...prev };
+      const rows = assocByIrc[ircIp] ?? [];
+      next[ircIp] = checked ? new Set(rows.map(r => r.ip)) : new Set();
+      return next;
+    });
+  };
 
-// Toggle Select-All for an IRC
-const toggleSelectAllLinked = (ircIp, checked) => {
-  setSelectedLinkedByIrc(prev => {
-    const next = { ...prev };
-    const rows = assocByIrc[ircIp] ?? [];
-    next[ircIp] = checked ? new Set(rows.map(r => r.ip)) : new Set();
-    return next;
-  });
-};
-
-// Get all selected linked IPs across every IRC
-const getAllSelectedLinkedIPs = () => {
-  const all = [];
-  for (const ircIp of Object.keys(selectedLinkedByIrc)) {
-    const set = selectedLinkedByIrc[ircIp];
-    if (set && set.size > 0) {
-      set.forEach(ip => all.push(ip));
+  const getAllSelectedLinkedIPs = () => {
+    const all = [];
+    for (const ircIp of Object.keys(selectedLinkedByIrc)) {
+      const set = selectedLinkedByIrc[ircIp];
+      if (set && set.size > 0) {
+        set.forEach(ip => all.push(ip));
+      }
     }
-  }
-  return all;
-};
+    return all;
+  };
 
-// Helper: is any linked system selected globally?
-const anyLinkedSelected = Object.values(selectedLinkedByIrc).some(set => (set?.size ?? 0) > 0);
+  const anyLinkedSelected = Object.values(selectedLinkedByIrc).some(set => (set?.size ?? 0) > 0);
 
-
-// Add IRC dialog field errors
+  // Add IRC dialog field errors
   const [ircErrors, setIrcErrors] = useState({ ip: '', username: '', password: '' });
 
   // Add Rack Devices dialog field errors
@@ -484,24 +395,110 @@ const anyLinkedSelected = Object.values(selectedLinkedByIrc).some(set => (set?.s
 
   const [expanded, setExpanded] = useState({});
   const [assocByIrc, setAssocByIrc] = useState({});
-  const [openScriptDialog, setOpenScriptDialog] = useState(false);
-  const [scriptFile, setScriptFile] = useState(null);
 
+  // Handle SSE rack-device events (batched) to update assocByIrc in real-time.
+  // useSSE now flushes events as an array every ~50ms so all updates from a
+  // single leak cycle arrive together, producing one render instead of N.
+  useEffect(() => {
+    if (!racdeviceBatch || racdeviceBatch.length === 0) return;
 
-  
-// Profile menu state
+    setAssocByIrc((prev) => {
+      let next = { ...prev };
+      for (const { type, data } of racdeviceBatch) {
+        if (type === 'racdevice_state_changed' && data.ip) {
+          // Resolve the owning IRC — prefer explicit ircIp from the event,
+          // fall back to searching through the current assocByIrc map.
+          let ircIp = data.ircIp;
+          if (!ircIp) {
+            for (const key of Object.keys(next)) {
+              if (next[key]?.some((r) => r.ip === data.ip)) { ircIp = key; break; }
+            }
+          }
+          if (!ircIp) continue;
+          const rows = next[ircIp];
+          if (!rows) continue;
+          next = {
+            ...next,
+            [ircIp]: rows.map((r) =>
+              r.ip === data.ip ? { ...r, status: data.state || r.status } : r
+            ),
+          };
+        } else if (type === 'racdevice_added' && data.ip && data.ircIp) {
+          const rows = next[data.ircIp] ?? [];
+          if (rows.some((r) => r.ip === data.ip)) continue; // already exists
+          next = {
+            ...next,
+            [data.ircIp]: [
+              ...rows,
+              {
+                ip: data.ip,
+                status: data.state || 'Unknown',
+                type: (data.systemtypedesc || '').toUpperCase(),
+                selectedType: null,
+              },
+            ],
+          };
+        } else if (type === 'racdevice_deleted' && data.ip) {
+          for (const ircIp of Object.keys(next)) {
+            const rows = next[ircIp];
+            if (rows && rows.some((r) => r.ip === data.ip)) {
+              next = { ...next, [ircIp]: rows.filter((r) => r.ip !== data.ip) };
+              break;
+            }
+          }
+        }
+      }
+      return next;
+    });
+  }, [racdeviceBatch]);
+
+  // Sync ircList when ircStatusMap gains or loses keys (from irc_added / irc_deleted SSE events).
+  // This ensures adding or deleting an IRC from another tab, API call, or the simulator
+  // immediately updates the dashboard without a manual browser refresh.
+  const prevSSEKeysRef = useRef(null);
+  useEffect(() => {
+    const currentKeys = new Set(Object.keys(liveStatusMap));
+    // Skip the very first comparison — the initial snapshot populates ircStatusMap
+    // before ircList is fetched, so every key looks "new".
+    if (prevSSEKeysRef.current === null) {
+      prevSSEKeysRef.current = currentKeys;
+      return;
+    }
+    const prevKeys = prevSSEKeysRef.current;
+    prevSSEKeysRef.current = currentKeys;
+
+    // Detect newly added IRCs (key in current but not in previous ircStatusMap)
+    const added = [...currentKeys].filter((ip) => !prevKeys.has(ip));
+    if (added.length > 0) {
+      // Fetch the full IRC list so we get all metadata (username, etc.)
+      refreshIRCList();
+    }
+
+    // Detect deleted IRCs (key in previous but not in current ircStatusMap)
+    const deleted = [...prevKeys].filter((ip) => !currentKeys.has(ip));
+    if (deleted.length > 0) {
+      const gone = new Set(deleted);
+      setIrcList((prev) => prev.filter((x) => !gone.has(x.ip)));
+      setAssocByIrc((prev) => {
+        const next = { ...prev };
+        deleted.forEach((ip) => delete next[ip]);
+        return next;
+      });
+    }
+  }, [liveStatusMap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Profile menu state
   const [profileAnchor, setProfileAnchor] = useState(null);
   const profileMenuOpen = Boolean(profileAnchor);
   const openProfileMenu = (e) => setProfileAnchor(e.currentTarget);
   const closeProfileMenu = () => setProfileAnchor(null);
 
-  // (Optional) Change Password dialog managed here on the dashboard
-  
-// Confirm Reset dialog state (add these)
-const [openResetConfirm, setOpenResetConfirm] = useState(false);
-const [resetBusy, setResetBusy] = useState(false);
-const [resetError, setResetError] = useState('');
+  // Confirm Reset dialog state
+  const [openResetConfirm, setOpenResetConfirm] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState('');
 
+  // Change Password dialog state
   const [openChange, setOpenChange] = useState(false);
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
@@ -511,45 +508,21 @@ const [resetError, setResetError] = useState('');
 
   const [typeOpen, setTypeOpen] = useState(false);
 
-
-  
-
-  
-// --- validators (put these near the top of the file) ---
+  // Validators
   const IPV4_RE = /^[a-zA-Z0-9:.]+$/;
-
   const isValidIPv4 = (ip) => typeof ip === 'string' && IPV4_RE.test(ip.trim());
   const isNonEmpty = (s) => typeof s === 'string' && s.trim().length > 0;
-  const hasMinLen = (s, n) => typeof s === 'string' && s.trim().length >= n;   // ← define this
+  const hasMinLen = (s, n) => typeof s === 'string' && s.trim().length >= n;
   const isNonNegativeIntegerString = (s) => {
     if (!isNonEmpty(s)) return false;
     const n = Number(s);
     return Number.isInteger(n) && n >= 0;
   };
 
-// --- Change Password dialog handlers ---
-
-
   const closeChange = () => {
     if (cpBusy) return;
     setOpenChange(false);
     setOldPass(''); setNewPass(''); setConfirm(''); setCpError('');
-  };
-
-  const saveChange = async () => {
-    setCpError('');
-    if (newPass !== confirm) {
-      setCpError('New password and confirmation do not match.');
-      return;
-    }
-    setCpBusy(true);
-    const res = await changePassword(oldPass, newPass);
-    setCpBusy(false);
-    if (!res.ok) {
-      setCpError(res.message || 'Unable to change password.');
-      return;
-    }
-    closeChange();
   };
 
   // Fetch IRC list on mount
@@ -577,7 +550,6 @@ const [resetError, setResetError] = useState('');
       const data = await res.json();
       setIrcList(data.data || []);
       setSystemTypes(data.systemTypes || []);
-      // if (expandIp) setExpanded(prev => ({ ...prev, [expandIp]: true }));
     } catch (err) {
       console.error('Error refreshing IRC list:', err);
     }
@@ -669,7 +641,6 @@ const handleAddSystem = async () => {
     console.error('Error adding system:', err);
   }
 };
-
 
  
 async function bulkDeleteLinkedSystems(ipsByIrc) {
@@ -877,6 +848,18 @@ const handleDeleteLinkedSystems = async () => {
         <Typography variant="h6" sx={{ fontWeight: 600 }} color="#fff">
           IRC Dashboard
         </Typography>
+        <Tooltip title={sseConnected ? 'Live updates active' : 'Live updates disconnected — reconnecting'}>
+          <span style={{
+            display: 'inline-block',
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            backgroundColor: sseConnected ? '#66BB6A' : '#ef5350',
+            marginLeft: 12,
+            marginRight: 'auto',
+            boxShadow: sseConnected ? '0 0 6px #66BB6A' : 'none',
+          }} />
+        </Tooltip>
 
         <IconButton
           size="large"
@@ -1071,7 +1054,6 @@ const handleDeleteLinkedSystems = async () => {
   </DialogActions>
 </Dialog>
 
-
       <div style={{ marginBottom: '20px' }}>
         <Button variant="contained" color="primary" onClick={() => setOpenIRCDialog(true)}>ADD IRC</Button>
         <Button
@@ -1101,9 +1083,6 @@ const handleDeleteLinkedSystems = async () => {
           Delete Systems
         </Button>
       </div>
-
-
-
 
       <div style={{ marginTop: '20px' }}>
         {loading ? (
@@ -1151,9 +1130,6 @@ const handleDeleteLinkedSystems = async () => {
                     >
                       Add Rack Device
                     </Button>
-                    {/* <Button variant="outlined" color="secondary" onClick={() => setOpenScriptDialog(true)}>
-                      Add Custom Action
-                    </Button> */}
                   </>
                 </Tooltip>
               </div>
@@ -1368,36 +1344,6 @@ const handleDeleteLinkedSystems = async () => {
   </DialogActions>
 </Dialog>
 
-
-      {/* Upload script dialog
-      <Dialog open={openScriptDialog} onClose={() => setOpenScriptDialog(false)}>
-        <DialogTitle>Upload Custom Script</DialogTitle>
-        <DialogContent>
-          <input
-            type="file"
-            accept=".sh,.py,.txt"
-            onChange={(e) => setScriptFile(e.target.files[0])}
-            style={{ marginTop: '10px' }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenScriptDialog(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={() => {
-              if (scriptFile) {
-                console.log('Uploading script:', scriptFile.name);
-                // TODO: implement upload logic (POST to backend)
-              }
-              setOpenScriptDialog(false);
-            }}
-          >
-            Submit
-          </Button>
-        </DialogActions>
-      </Dialog> */}
-
       {/* Bulk delete confirm dialog */}
       <Dialog
         open={bulkConfirmOpen}
@@ -1457,8 +1403,6 @@ const handleDeleteLinkedSystems = async () => {
         </Button>
       </DialogActions>
     </Dialog>
-
-
 
     </div>
   );

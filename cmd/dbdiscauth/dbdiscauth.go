@@ -270,6 +270,17 @@ func GetValveStateFromDB(db *sql.DB) ([]auth.ValveState, error) {
 	return ret, nil
 }
 
+// GetValveStateForIRC returns the full valve state (both valves) for a single IRC.
+func GetValveStateForIRC(db *sql.DB, ircIp string) (*auth.ValveState, error) {
+	var vs auth.ValveState
+	err := db.QueryRow("SELECT ircip, vstate1, vstate2 FROM ValveStatus WHERE ircip = ?", ircIp).
+		Scan(&vs.Ip, &vs.VState1, &vs.VState2)
+	if err != nil {
+		return nil, err
+	}
+	return &vs, nil
+}
+
 func GetSystemTypeFromDB(db *sql.DB) ([]auth.SystemType, error) {
 	results, err := db.Query("SELECT description FROM SystemType")
 	if err != nil {
@@ -367,6 +378,16 @@ func UpdateServiceXToDB(db *sql.DB, state string, ip string) error {
 		return err
 	}
 	return nil
+}
+
+// GetIrcIpForDevice returns the parent IRC IP for a given device IP.
+func GetIrcIpForDevice(db *sql.DB, deviceIP string) (string, error) {
+	var ircIp string
+	err := db.QueryRow("SELECT ircIp FROM AssociatedSystem WHERE ip = ?", deviceIP).Scan(&ircIp)
+	if err != nil {
+		return "", err
+	}
+	return ircIp, nil
 }
 func DeleteIRCFromDB(db *sql.DB, service auth.Service) error {
 	stmt, err := db.Prepare("DELETE FROM IRC WHERE ip = ?")
@@ -707,6 +728,11 @@ func main() {
 				err = AddIRCToDB(db, svc, authorizationService)
 				if err != nil {
 					logging.Error("Addservice,Failed to write db entries", "err", err)
+				} else {
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventIRCAdded, "ip", svc.Ip)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventIRCAdded, map[string]string{"ip": svc.Ip, "state": svc.State}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventIRCAdded, "err", pubErr)
+					}
 				}
 			case auth.ADDSERVICEITEM:
 				var si auth.ServiceItem
@@ -718,6 +744,13 @@ func main() {
 				logging.Info("ADDSERVICEITEM request received")
 				if err != nil {
 					logging.Error("Addserviceitem,Failed to write db entries", "err", err)
+				} else {
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventRacdeviceAdded, "ip", si.Ip, "ircIp", si.ServiceIP)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventRacdeviceAdded, map[string]string{
+						"ip": si.Ip, "ircIp": si.ServiceIP, "systemtypedesc": si.Systemtypedesc, "state": si.State,
+					}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventRacdeviceAdded, "err", pubErr)
+					}
 				}
 			case auth.GETALLSERVICES:
 				services, err := GetIRCFromDB(db)
@@ -778,6 +811,11 @@ func main() {
 				err = UpdateIRCToDB(db, svc, authorizationService)
 				if err != nil {
 					logging.Error("Updateservice,Failed to write db entries", "err", err)
+				} else {
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventIRCStateChanged, "ip", svc.Ip, "state", svc.State)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventIRCStateChanged, map[string]string{"ip": svc.Ip, "state": svc.State}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventIRCStateChanged, "err", pubErr)
+					}
 				}
 			case auth.UPDATESERVICEITEM:
 				var si auth.ServiceItem
@@ -789,6 +827,11 @@ func main() {
 				err = UpdateAssosiatedSystemstoDB(db, si, authorizationService, "")
 				if err != nil {
 					logging.Error("Updateserviceitem,Failed to write db entries", "err", err)
+				} else {
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventRacdeviceStateChanged, "ip", si.Ip, "ircIp", si.ServiceIP, "state", si.State)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventRacdeviceStateChanged, map[string]string{"ip": si.Ip, "ircIp": si.ServiceIP, "state": si.State}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventRacdeviceStateChanged, "err", pubErr)
+					}
 				}
 			case auth.UPDATESERVICEX:
 				var svc auth.Service
@@ -800,6 +843,17 @@ func main() {
 				err = UpdateServiceXToDB(db, svc.State, svc.Ip)
 				if err != nil {
 					logging.Error("UpdateserviceX,Failed to write db entries", "err", err)
+				} else {
+					// Look up the parent IRC IP so the frontend can route
+					// the event to the correct IRC row.
+					ircIp, lookupErr := GetIrcIpForDevice(db, svc.Ip)
+					if lookupErr != nil {
+						logging.Warn("UPDATESERVICEX: could not look up ircIp for device", "ip", svc.Ip, "err", lookupErr)
+					}
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventRacdeviceStateChanged, "ip", svc.Ip, "ircIp", ircIp, "state", svc.State)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventRacdeviceStateChanged, map[string]string{"ip": svc.Ip, "ircIp": ircIp, "state": svc.State}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventRacdeviceStateChanged, "err", pubErr)
+					}
 				}
 			case auth.ADDSYSTEMTYPE:
 				var sysType auth.SystemType
@@ -819,16 +873,35 @@ func main() {
 					break
 				}
 				logging.Info("UPDATEVALVESTATE request", "valveState", vs)
+				valveWriteOk := true
 				if vs.VState1 != "" {
 					err = UpdateValveState1ToDB(db, vs)
 					if err != nil {
 						logging.Error("UpdateValveState (vstate1) failed to write db entries", "err", err)
+						valveWriteOk = false
 					}
 				}
 				if vs.VState2 != "" {
 					err = UpdateValveState2ToDB(db, vs)
 					if err != nil {
 						logging.Error("UpdateValveState (vstate2) failed to write db entries", "err", err)
+						valveWriteOk = false
+					}
+				}
+				if valveWriteOk {
+					// Read back full valve state from DB so the SSE event
+					// always includes both valves' current state, not just
+					// the one that changed.
+					fullVS, readErr := GetValveStateForIRC(db, vs.Ip)
+					if readErr != nil {
+						logging.Warn("Could not read back full valve state, publishing partial", "ip", vs.Ip, "err", readErr)
+						fullVS = &vs // fallback to the partial update
+					}
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventValveStateChanged, "ip", fullVS.Ip, "v1", fullVS.VState1, "v2", fullVS.VState2)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventValveStateChanged, map[string]string{
+						"ip": fullVS.Ip, "valve1state": fullVS.VState1, "valve2state": fullVS.VState2,
+					}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventValveStateChanged, "err", pubErr)
 					}
 				}
 			case auth.GETVALVESTATE:
@@ -868,6 +941,10 @@ func main() {
 				} else {
 					logging.Info("Deleted from database", "service", svc)
 					DataBusClient.DeleteProducer(svc)
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventIRCDeleted, "ip", svc.Ip)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventIRCDeleted, map[string]string{"ip": svc.Ip}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventIRCDeleted, "err", pubErr)
+					}
 				}
 			case auth.DELETESERVICEITEM:
 				var si auth.ServiceItem
@@ -880,6 +957,10 @@ func main() {
 					logging.Error("Deleteserviceitem,Failed to delete db entries", "err", err)
 				} else {
 					DataBusClient.DeleteProducer(si.Service)
+					logging.Info("SSE: publishing UIEvent", "event", auth.UIEventRacdeviceDeleted, "ip", si.Ip)
+					if pubErr := authorizationService.PublishUIEvent(auth.UIEventRacdeviceDeleted, map[string]string{"ip": si.Ip}); pubErr != nil {
+						logging.Error("SSE: failed to publish UIEvent", "event", auth.UIEventRacdeviceDeleted, "err", pubErr)
+					}
 					time.Sleep(2 * time.Second)
 				}
 			case auth.UPDATELOGIN:

@@ -9,8 +9,8 @@ github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311/go.mod h1:b583j
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/dell/iDRAC-Telemetry-Reference-Tools v1.0.0 h1:PFkmwjEAr7xhGXf38nkzu8N6/WCFXg5vsegwFkYSDZI=
-github.com/dell/iDRAC-Telemetry-Reference-Tools v1.0.0/go.mod h1:Ih71p6FViPAEtl8XhtevZXMmTGswbOu4yrJlITrJiw8=
+github.com/dell/iDRAC-Telemetry-Reference-Tools v1.0.1-0.20260323025306-8817e68014c9 h1:MHpLk0FfBxYO2Vp1wEBcl4pe1uwmWY6CJhbKu5bt4h8=
+github.com/dell/iDRAC-Telemetry-Reference-Tools v1.0.1-0.20260323025306-8817e68014c9/go.mod h1:r1bHS5v5lCkdfBjDW8P3M3BjR7ICht771aQpaPvb+28=
 github.com/gabriel-vasile/mimetype v1.4.2 h1:w5qFW6JKBz9Y393Y4q372O9A7cUSequkh1Q7OhCmWKU=
 github.com/gabriel-vasile/mimetype v1.4.2/go.mod h1:zApsH/mKG4w07erKIaJPFiX0Tsq9BFQgN3qGY5GnNgA=
 github.com/gin-contrib/sse v0.1.0 h1:Y/yl/+YNO8GZSjAhjMsSuLt29uWRFHdHYUb5lYOV9qE=

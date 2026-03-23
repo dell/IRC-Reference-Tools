@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/dell/iDRAC-Telemetry-Reference-Tools/pkg/config"
 	"github.com/dell/iDRAC-Telemetry-Reference-Tools/pkg/databus"
 	"github.com/dell/iDRAC-Telemetry-Reference-Tools/pkg/messagebus"
+	"github.com/dell/iDRAC-Telemetry-Reference-Tools/pkg/wire"
 	"github.com/gin-gonic/gin"
 )
 
@@ -216,6 +218,35 @@ func AddAssociatedSystem(c *gin.Context, s *config.SystemHandler) {
 	c.JSON(200, gin.H{"status": "System added"})
 }
 
+// -------------------- SSE STOMP Bridge --------------------
+
+// startSSEBridge reads UI notification messages from the given channel
+// (populated by a STOMP subscription) and forwards them to the SSE hub.
+func startSSEBridge(messages <-chan string, hub *SSEHub) {
+	go func() {
+		for msg := range messages {
+			logging.Debug("SSE bridge received STOMP message", "raw", msg)
+			var env wire.Envelope
+			if err := json.Unmarshal([]byte(msg), &env); err != nil {
+				logging.Error("Failed to decode SSE envelope", "err", err)
+				continue
+			}
+			logging.Debug("SSE bridge decoded envelope", "type", env.Type)
+			if env.Type != auth.SSENotification {
+				logging.Debug("SSE bridge skipping non-SSE envelope", "type", env.Type)
+				continue
+			}
+			var notification auth.UINotification
+			if err := json.Unmarshal(env.Payload, &notification); err != nil {
+				logging.Error("Failed to decode UI notification", "err", err)
+				continue
+			}
+			logging.Info("SSE bridge forwarding event to hub", "event", notification.Event, "data", string(env.Payload))
+			hub.Broadcast(notificationToSSEEvent(notification))
+		}
+	}()
+}
+
 // -------------------- Main --------------------
 
 func main() {
@@ -236,6 +267,18 @@ func main() {
 		config.NewConfigClientWithBus(mb),
 	)
 
+	// Initialize SSE hub and bridge from ActiveMQ → browser clients
+	sseHub := NewSSEHub()
+	sseMessages := make(chan string, 64)
+	_, err := mb.ReceiveMessage(sseMessages, auth.SSEEventsTopic)
+	if err != nil {
+		logging.Error("Failed to subscribe to SSE topic", "topic", auth.SSEEventsTopic, "err", err)
+	} else {
+		logging.Info("SSE bridge started", "topic", auth.SSEEventsTopic)
+		startSSEBridge(sseMessages, sseHub)
+	}
+	sseHub.StartHeartbeat(30 * time.Second)
+
 	r := gin.Default()
 	r.Static("/static", "./frontend/build/static")
 	r.StaticFile("/", "./frontend/build/index.html")
@@ -249,6 +292,9 @@ func main() {
 	pr.Use(loginauth.AuthRequiredOrBasic(systemHandler))
 	{
 		pr.GET("/api/v1/me", loginauth.Me())
+
+		// SSE live-update stream
+		pr.GET("/api/v1/events", func(c *gin.Context) { sseHandler(c, sseHub, systemHandler) })
 
 		// Your existing APIs now protected:
 		pr.POST("/api/v1/irc", func(c *gin.Context) { addService(c, systemHandler) })
