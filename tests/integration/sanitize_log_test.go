@@ -5,6 +5,9 @@
 // that sensitive data (passwords, tokens, secrets) is never logged in
 // plaintext at any log level.
 //
+// Credential masking relies on the Stringer interface: Service.String() and
+// ServiceItem.String() replace the Auth field with "*****".
+//
 // Prerequisites:
 //
 //	LOG_LEVEL=debug bash docker-compose-files/compose.sh up --build -d
@@ -223,9 +226,11 @@ func TestLogSanitization(t *testing.T) {
 		}
 	})
 
-	t.Run("redacted_marker_present", func(t *testing.T) {
-		if !strings.Contains(state.logs, "[REDACTED]") {
-			t.Error("[REDACTED] not found in logs — sanitization may not be active.\n" +
+	t.Run("auth_masked_in_logs", func(t *testing.T) {
+		// Service.String() and ServiceItem.String() replace credentials
+		// with "*****". Verify this masking appears in the logs.
+		if !strings.Contains(state.logs, "Auth: *****") {
+			t.Error("Auth: ***** not found in logs — Stringer masking may not be active.\n" +
 				"Hint: restart with LOG_LEVEL=debug to ensure Info-level logs are emitted.")
 		}
 	})
