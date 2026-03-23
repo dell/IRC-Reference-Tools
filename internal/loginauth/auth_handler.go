@@ -2,6 +2,7 @@ package loginauth
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dell/iDRAC-Telemetry-Reference-Tools/pkg/config"
@@ -44,7 +45,9 @@ func AdminLogin(s *config.SystemHandler) gin.HandlerFunc {
 			return
 		}
 		writeAuthCookie(c, token, tokenExpiry)
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "token": token})
+
+		isDefault := req.Username == DefaultAdmin && req.Password == DefaultAdmin
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "token": token, "defaultCredentials": isDefault})
 	}
 }
 
@@ -63,6 +66,11 @@ func ChangePassword(s *config.SystemHandler) gin.HandlerFunc {
 			return
 		}
 		username := DefaultAdmin
+
+		if len(strings.TrimSpace(req.NewPassword)) < 4 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "password must be at least 4 characters"})
+			return
+		}
 
 		ok, newVer, err := changeAdminPassword(s, username, req.OldPassword, req.NewPassword)
 		if err != nil {

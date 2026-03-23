@@ -538,6 +538,10 @@ const [resetError, setResetError] = useState('');
 
   const saveChange = async () => {
     setCpError('');
+    if (!hasMinLen(newPass, 4)) {
+      setCpError('Password must be at least 4 characters.');
+      return;
+    }
     if (newPass !== confirm) {
       setCpError('New password and confirmation do not match.');
       return;
@@ -962,7 +966,7 @@ const handleDeleteLinkedSystems = async () => {
       margin="dense"
       value={newPass}
       onChange={(e) => setNewPass(e.target.value)}
-      helperText="Minimum 6 characters"
+      helperText="Minimum 4 characters"
     />
     <TextField
       type="password"
@@ -999,6 +1003,10 @@ const handleDeleteLinkedSystems = async () => {
       </Button>
       <Button onClick={async () => {
         setCpError('');
+        if (!hasMinLen(newPass, 4)) {
+          setCpError('Password must be at least 4 characters.');
+          return;
+        }
         if (newPass !== confirm) {
           setCpError('New password and confirmation do not match.');
           return;
