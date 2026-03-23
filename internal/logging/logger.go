@@ -23,17 +23,6 @@ type logger struct {
 func New(level slog.Level) Logger {
 	opts := &slog.HandlerOptions{
 		Level: level,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if isSensitiveKey(a.Key) {
-				a.Value = slog.StringValue("[REDACTED]")
-				return a
-			}
-			if a.Value.Kind() == slog.KindAny {
-				a.Value = slog.AnyValue(sanitizeAny(a.Value.Any()))
-				return a
-			}
-			return a
-		},
 	}
 	handler := slog.NewTextHandler(os.Stdout, opts)
 
