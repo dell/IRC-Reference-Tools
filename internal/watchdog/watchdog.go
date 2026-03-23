@@ -40,7 +40,7 @@ func EndWatchdog(service auth.Service) error {
 	logging.Info("Ending watchdog", "ip", service.Ip)
 	resp, err := httpclient.Post(
 		"https://"+service.Ip+endWatchdogURI,
-		map[string]interface{}{},
+		map[string]interface{}{"Continue": true},
 		nil,
 		service.Auth["username"],
 		service.Auth["password"],
