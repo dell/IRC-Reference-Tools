@@ -4,7 +4,7 @@ ARG USERNAME=irc
 ARG GROUPNAME=irc
 ARG CMD
 
-FROM golang:1.24 as builder
+FROM golang:1.25 as builder
 
 ARG USER_ID
 ARG GROUP_ID
