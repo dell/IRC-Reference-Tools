@@ -34,7 +34,9 @@ export async function login(username, password) {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   });
-  return ok ? { ok: true } : { ok: false, message: data?.error || 'Invalid credentials' };
+  return ok
+    ? { ok: true, defaultCredentials: username === 'admin' && password === 'admin' }
+    : { ok: false, message: data?.error || 'Invalid credentials' };
 }
 
 /**
