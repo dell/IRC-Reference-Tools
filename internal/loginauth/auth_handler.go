@@ -45,9 +45,7 @@ func AdminLogin(s *config.SystemHandler) gin.HandlerFunc {
 			return
 		}
 		writeAuthCookie(c, token, tokenExpiry)
-
-		isDefault := req.Username == DefaultAdmin && req.Password == DefaultAdmin
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "token": token, "defaultCredentials": isDefault})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "token": token})
 	}
 }
 
