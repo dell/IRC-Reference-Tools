@@ -44,16 +44,7 @@ type ConfigurableRedfishClient struct {
 
 // NewConfigurableClient creates a new ConfigurableRedfishClient with the given config
 func NewConfigurableClient(hostname, username, password string, config *systemtype.SystemTypeConfig) (*ConfigurableRedfishClient, error) {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &ConfigurableRedfishClient{
-		Hostname:   hostname,
-		Username:   username,
-		Password:   password,
-		HttpClient: &http.Client{Transport: tr},
-		Config:     config,
-	}
+	client := NewClientWithoutValidation(hostname, username, password, config)
 
 	// Validate connection
 	_, err := client.GetUri("/redfish/v1")
@@ -61,6 +52,22 @@ func NewConfigurableClient(hostname, username, password string, config *systemty
 		return client, err
 	}
 	return client, nil
+}
+
+// NewClientWithoutValidation creates a ConfigurableRedfishClient without validating the
+// connection. Use this when the target device may not be fully reachable (e.g., during
+// shutdown monitoring) and you only need to attempt individual Redfish GET calls.
+func NewClientWithoutValidation(hostname, username, password string, config *systemtype.SystemTypeConfig) *ConfigurableRedfishClient {
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	return &ConfigurableRedfishClient{
+		Hostname:   hostname,
+		Username:   username,
+		Password:   password,
+		HttpClient: &http.Client{Transport: tr},
+		Config:     config,
+	}
 }
 
 func (c *ConfigurableRedfishClient) addAuthToRequest(req *http.Request) {
@@ -105,18 +112,24 @@ func (c *ConfigurableRedfishClient) GetUri(uri string) (*RedfishPayload, error) 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GetUri failed for %s with Error code %d",
-			c.Hostname+uri, resp.StatusCode)
-	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
+	// Some BMC firmware versions return valid JSON data with non-200 status codes
+	// (e.g., HTTP 500 with an embedded InternalError but complete response body).
+	// Try to parse the body as JSON regardless of status code.
 	ret := new(RedfishPayload)
-	err = json.Unmarshal(body, &ret.Object)
-	if err != nil {
+	if err := json.Unmarshal(body, &ret.Object); err != nil {
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("GetUri failed for %s with Error code %d",
+				c.Hostname+uri, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("Body %s could not parse to JSON %w", body, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		logging.Warn("Non-200 status code from Redfish endpoint with valid JSON body",
+			"uri", uri, "statusCode", resp.StatusCode, "host", c.Hostname)
 	}
 	return ret, nil
 }

@@ -221,6 +221,6 @@ func (d *ConfigurableDevice) MonitorStart(dataBusService *databus.DataBusService
 	authClient.UpdateServiceState(auth.MONITORING, d.Client.GetHostname())
 	d.State = auth.RUNNING
 
-	// Start alert listener
+	// Start SSE alert listener
 	d.StartAlertListener(dataBusService)
 }

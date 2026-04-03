@@ -355,6 +355,20 @@ func TestValidatePowerState(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "valid redfish-get config",
+			config: &SystemTypeConfig{
+				PowerState: &PowerStateConfig{
+					EndpointConfig: EndpointConfig{
+						URI:  "/redfish/v1/Systems/1",
+						Path: "$.PowerState",
+					},
+					MonitorType: MonitorTypeRedfishGet,
+				},
+			},
+			path:        "test.yaml",
+			expectError: false,
+		},
+		{
 			name: "missing power state",
 			config: &SystemTypeConfig{
 				PowerState: nil,
@@ -475,7 +489,7 @@ func TestValidatePowerState(t *testing.T) {
 			},
 			path:        "test.yaml",
 			expectError: true,
-			errorMsg:    "invalid monitorType 'invalid-type', must be 'redfish-sse' or 'tcp-ping'",
+			errorMsg:    "invalid monitorType 'invalid-type', must be 'redfish-sse', 'redfish-get', or 'tcp-ping'",
 		},
 		{
 			name: "empty monitor type defaults to tcp-ping",

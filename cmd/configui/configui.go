@@ -81,6 +81,7 @@ func getIRCList(c *gin.Context, s *config.SystemHandler) {
 		ircList = append(ircList, irc)
 	}
 	systemTypes := s.AuthClient.GetAllSystemTypes()
+	logging.Info("IRC SYSTEM", "ircList", ircList, "systemTypes", systemTypes, "valvestatus", valvestatus)
 	c.JSON(200, gin.H{"status": "Fetched IRC list", "data": ircList, "systemTypes": systemTypes})
 }
 
@@ -188,8 +189,17 @@ func AddAssociatedSystem(c *gin.Context, s *config.SystemHandler) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	logging.Info("Adding Associated System")
-	logging.Info("System details", "system", system)
+	logging.Info("Adding Associated System",
+		"ip", system.IP,
+		"systemtypedesc", system.Systemtypedesc,
+		"isforcefulshutdown", system.IsForcefulshutdown,
+		"timeout", system.Timeout)
+
+	// Graceful shutdown requires a non-zero timeout
+	if !system.IsForcefulshutdown && system.Timeout <= 0 {
+		c.JSON(400, gin.H{"error": "timeout must be greater than 0 for graceful shutdown"})
+		return
+	}
 
 	// Get IRC IP from URL
 	ircIP := c.Param("ip")
